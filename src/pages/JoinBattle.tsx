@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -15,26 +14,19 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-
-interface Battle {
-  id: string;
-  language: string;
-  difficulty: string;
-  duration: number;
-  isRated: boolean;
-  createdAt: string;
-  problemId: number;
-}
+import { supabase, Battle } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 const JoinBattle = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [battles, setBattles] = useState<Battle[]>([]);
   const [filteredBattles, setFilteredBattles] = useState<Battle[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [joiningBattleId, setJoiningBattleId] = useState<string | null>(null);
   const [difficultyFilter, setDifficultyFilter] = useState('all');
 
-  // Language mapping
   const languageLabels: Record<string, string> = {
     'javascript': 'JavaScript',
     'python': 'Python',
@@ -43,116 +35,178 @@ const JoinBattle = () => {
     'csharp': 'C#'
   };
   
-  // Difficulty color mapping
   const difficultyColors: Record<string, string> = {
-    'easy': 'bg-emerald-500/20 text-emerald-400',
-    'medium': 'bg-amber-500/20 text-amber-400',
-    'hard': 'bg-red-500/20 text-red-400'
+    'Easy': 'bg-emerald-500/20 text-emerald-400',
+    'Medium': 'bg-amber-500/20 text-amber-400',
+    'Hard': 'bg-red-500/20 text-red-400'
   };
   
-  // Difficulty points mapping
-  const difficultyPoints: Record<string, number> = {
-    'easy': 10,
-    'medium': 25,
-    'hard': 50
+  const difficultyPoints: Record<string, string> = {
+    'Easy': '10',
+    'Medium': '25',
+    'Hard': '50'
+  };
+
+  const fetchBattles = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('battles')
+        .select('*')
+        .eq('status', 'open')
+        .is('defender_id', null)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Error fetching battles:', error);
+        toast.error('Failed to load battles');
+        throw error;
+      }
+      
+      console.log('Fetched battles:', data);
+      if (data) {
+        setBattles(data);
+        setFilteredBattles(data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch battles:', error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
-    // Simulate fetching battles from API
-    const fetchBattles = async () => {
-      setIsLoading(true);
-      try {
-        // In a real app, this would be an API call to fetch battles
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Retrieve battles from localStorage (for demo purposes)
-        const storedBattles = JSON.parse(localStorage.getItem('battles') || '[]');
-        
-        // If no stored battles, create some demo battles
-        if (storedBattles.length === 0) {
-          const demoBattles: Battle[] = [
-            {
-              id: 'battle-1',
-              language: 'javascript',
-              difficulty: 'easy',
-              duration: 10,
-              isRated: true,
-              createdAt: new Date().toISOString(),
-              problemId: 42
-            },
-            {
-              id: 'battle-2',
-              language: 'python',
-              difficulty: 'medium',
-              duration: 15,
-              isRated: true,
-              createdAt: new Date().toISOString(),
-              problemId: 123
-            },
-            {
-              id: 'battle-3',
-              language: 'java',
-              difficulty: 'hard',
-              duration: 30,
-              isRated: false,
-              createdAt: new Date().toISOString(),
-              problemId: 456
-            }
-          ];
-          localStorage.setItem('battles', JSON.stringify(demoBattles));
-          setBattles(demoBattles);
-          setFilteredBattles(demoBattles);
-        } else {
-          setBattles(storedBattles);
-          setFilteredBattles(storedBattles);
-        }
-      } catch (error) {
-        toast.error("Failed to load battles");
-        console.error(error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchBattles();
   }, []);
 
   useEffect(() => {
-    // Apply filters
     let result = battles;
     
-    // Apply difficulty filter
     if (difficultyFilter !== 'all') {
       result = result.filter(battle => battle.difficulty === difficultyFilter);
     }
     
-    // Apply search filter
     if (searchTerm) {
       result = result.filter(battle =>
-        battle.language.includes(searchTerm.toLowerCase()) ||
-        languageLabels[battle.language]?.toLowerCase().includes(searchTerm.toLowerCase())
+        battle.programming_language.includes(searchTerm.toLowerCase()) ||
+        languageLabels[battle.programming_language]?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
     
     setFilteredBattles(result);
   }, [battles, searchTerm, difficultyFilter]);
 
-  const handleJoinBattle = (battle: Battle) => {
-    // In a real app, this would call an API to join the battle
-    localStorage.setItem('currentBattle', JSON.stringify(battle));
-    toast.success(`Joining battle as defender`);
-    navigate(`/battle/${battle.id}`);
+  const handleJoinBattle = async (battle: Battle) => {
+    if (!user) {
+      toast.error("You must be logged in to join a battle");
+      navigate('/login');
+      return;
+    }
+
+    if (battle.creator_id === user.id) {
+      toast.error("You cannot join your own battle!");
+      return;
+    }
+
+    setJoiningBattleId(battle.id);
+    
+    try {
+      // Verify battle is still available
+      const { data: currentBattle, error: fetchError } = await supabase
+        .from('battles')
+        .select('*')
+        .eq('id', battle.id)
+        .eq('status', 'open')
+        .is('defender_id', null)
+        .single();
+        
+      if (fetchError || !currentBattle) {
+        console.error("Error fetching battle or battle already taken:", fetchError);
+        toast.error("This battle is no longer available");
+        await fetchBattles(); // Refresh battle list
+        return;
+      }
+      
+      // Debug user ID - it should be a UUID string
+      console.log('Current user ID (raw):', user.id);
+      console.log('User ID type:', typeof user.id);
+      console.log('Battle ID:', battle.id);
+      console.log(supabase.auth.getUser());
+      
+      // Explicitly create update payload to ensure correct typing
+      const updatePayload = {
+        defender_id: user.id,
+        status: 'in_progress' as const,
+        started_at: new Date().toISOString()
+      };
+      
+      console.log('Update payload:', updatePayload);
+
+      const { data: battleData, error: battleError } = await supabase
+        .from('battles')
+        .update({
+          defender_id: user.id,
+          status: 'in_progress',
+          started_at: new Date().toISOString()
+        })
+        .eq('id', battle.id);
+      console.log('battleData', battleData);
+
+      const { error } = await supabase
+        .from('battles')
+        .update({'defender_id': user.id})
+        .eq('id', battle.id)
+        .select();
+        
+      if (error) {
+        console.error("Error joining battle:", error);
+        toast.error(`Failed to join: ${error.message}`);
+        throw error;
+      }
+
+      const { data: battleData2, error: battleError2 } = await supabase
+        .from('battles')
+        .select('defender_id')
+        .eq('id', battle.id);
+      console.log('battleData', battleData);
+     
+    
+      // console.log("Battle joined successfully, updated data:", data);
+      
+      // Verify the update was successful by fetching the battle again
+      const { data: verifyBattle, error: verifyError } = await supabase
+        .from('battles')
+        .select('*')
+        .eq('id', battle.id)
+        .single();
+        
+      if (verifyError) {
+        console.error("Error verifying battle update:", verifyError);
+      } else {
+        console.log("Verified battle data:", verifyBattle);
+        
+        if (!verifyBattle.defender_id) {
+          console.warn("Warning: Defender ID is null after update!");
+        } else if (verifyBattle.defender_id !== user.id) {
+          console.warn(`Warning: Defender ID mismatch! Expected: ${user.id}, Got: ${verifyBattle.defender_id}`);
+        } else {
+          console.log("Defender ID updated successfully!");
+        }
+      }
+      
+      toast.success("You've joined the battle!");
+      navigate(`/battle/${battle.id}`);
+    } catch (error: any) {
+      toast.error(`Failed to join battle: ${error.message || "Please try again."}`);
+      console.error('Error joining battle:', error);
+    } finally {
+      setJoiningBattleId(null);
+    }
   };
 
   const refreshBattles = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      const storedBattles = JSON.parse(localStorage.getItem('battles') || '[]');
-      setBattles(storedBattles);
-      setFilteredBattles(storedBattles);
-      setIsLoading(false);
-      toast.success("Battle list refreshed");
-    }, 800);
+    fetchBattles();
+    toast.success("Battle list refreshed");
   };
 
   const formatTimeAgo = (dateString: string) => {
@@ -183,7 +237,6 @@ const JoinBattle = () => {
           </p>
         </div>
         
-        {/* Filters */}
         <div className="mb-8 flex flex-col md:flex-row gap-3 justify-between">
           <div className="flex-grow max-w-md">
             <Input
@@ -203,23 +256,23 @@ const JoinBattle = () => {
               All
             </Button>
             <Button
-              variant={difficultyFilter === 'easy' ? 'default' : 'outline'}
-              className={difficultyFilter === 'easy' ? 'bg-emerald-500 text-black' : 'border-emerald-500/50 text-emerald-400'}
-              onClick={() => setDifficultyFilter('easy')}
+              variant={difficultyFilter === 'Easy' ? 'default' : 'outline'}
+              className={difficultyFilter === 'Easy' ? 'bg-emerald-500 text-black' : 'border-emerald-500/50 text-emerald-400'}
+              onClick={() => setDifficultyFilter('Easy')}
             >
               Easy
             </Button>
             <Button
-              variant={difficultyFilter === 'medium' ? 'default' : 'outline'}
-              className={difficultyFilter === 'medium' ? 'bg-amber-500 text-black' : 'border-amber-500/50 text-amber-400'}
-              onClick={() => setDifficultyFilter('medium')}
+              variant={difficultyFilter === 'Medium' ? 'default' : 'outline'}
+              className={difficultyFilter === 'Medium' ? 'bg-amber-500 text-black' : 'border-amber-500/50 text-amber-400'}
+              onClick={() => setDifficultyFilter('Medium')}
             >
               Medium
             </Button>
             <Button
-              variant={difficultyFilter === 'hard' ? 'default' : 'outline'}
-              className={difficultyFilter === 'hard' ? 'bg-red-500 text-black' : 'border-red-500/50 text-red-400'}
-              onClick={() => setDifficultyFilter('hard')}
+              variant={difficultyFilter === 'Hard' ? 'default' : 'outline'}
+              className={difficultyFilter === 'Hard' ? 'bg-red-500 text-black' : 'border-red-500/50 text-red-400'}
+              onClick={() => setDifficultyFilter('Hard')}
             >
               Hard
             </Button>
@@ -234,7 +287,6 @@ const JoinBattle = () => {
           </div>
         </div>
         
-        {/* Battle list */}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <RefreshCw size={32} className="animate-spin text-icon-accent mb-4" />
@@ -251,12 +303,12 @@ const JoinBattle = () => {
                   <div className="mb-4 md:mb-0">
                     <div className="flex items-center gap-2 mb-1.5">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${difficultyColors[battle.difficulty]}`}>
-                        {battle.difficulty.charAt(0).toUpperCase() + battle.difficulty.slice(1)}
+                        {battle.difficulty}
                       </span>
                       <span className="text-xs bg-icon-accent/20 text-icon-accent px-2 py-0.5 rounded-full">
                         {difficultyPoints[battle.difficulty]} points
                       </span>
-                      {battle.isRated && (
+                      {battle.battle_type === 'Rated' && (
                         <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full">
                           Rated
                         </span>
@@ -264,7 +316,7 @@ const JoinBattle = () => {
                     </div>
                     <h3 className="text-lg font-medium flex items-center gap-2">
                       <Code size={18} className="text-icon-accent" />
-                      <span>Battle {battle.id.substring(0, 8)} in {languageLabels[battle.language]}</span>
+                      <span>Battle in {languageLabels[battle.programming_language] || battle.programming_language}</span>
                     </h3>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-sm text-icon-light-gray">
                       <div className="flex items-center gap-1.5">
@@ -273,20 +325,30 @@ const JoinBattle = () => {
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Calendar size={14} />
-                        <span>{formatTimeAgo(battle.createdAt)}</span>
+                        <span>{formatTimeAgo(battle.created_at)}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Shield size={14} />
-                        <span>{battle.isRated ? 'Rated' : 'Casual'}</span>
+                        <span>{battle.battle_type}</span>
                       </div>
                     </div>
                   </div>
                   <Button
                     onClick={() => handleJoinBattle(battle)}
                     className="w-full md:w-auto icon-button-primary group"
+                    disabled={isLoading || joiningBattleId === battle.id}
                   >
-                    Defend
-                    <ChevronRight className="ml-1 h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                    {joiningBattleId === battle.id ? (
+                      <>
+                        <RefreshCw size={16} className="animate-spin mr-2" />
+                        Joining...
+                      </>
+                    ) : (
+                      <>
+                        Defend
+                        <ChevronRight className="ml-1 h-4 w-4 group-hover:translate-x-1 transition-transform" />
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>

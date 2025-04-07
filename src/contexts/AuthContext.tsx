@@ -1,33 +1,31 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabase, Profile } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 interface AuthContextType {
   user: User | null;
-  profile: Profile | null;
+  profile: any;
   session: Session | null;
   loading: boolean;
   signInWithGithub: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  profile: null,
-  session: null,
-  loading: true,
-  signInWithGithub: async () => {},
-  signOut: async () => {},
-});
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -50,6 +48,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state change event:', event);
       setSession(session);
       setUser(session?.user ?? null);
       
@@ -71,40 +70,65 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [navigate]);
 
   const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (error) {
-      console.error('Error fetching profile:', error);
-      return;
-    }
-
-    if (data) {
-      setProfile(data as Profile);
-    } else {
-      // Create a new profile if it doesn't exist
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (user) {
-        const newProfile = {
-          id: user.id,
-          email: user.email,
-          name: user.user_metadata?.name || user.user_metadata?.full_name || 'Anonymous Coder',
-          avatar_url: user.user_metadata?.avatar_url || null,
-          rating: 1000, // Default rating as per requirement
-        };
-        
-        const { error } = await supabase.from('profiles').insert(newProfile);
-        
-        if (!error) {
-          setProfile(newProfile as Profile);
-        } else {
-          console.error('Error creating profile:', error);
-        }
+    try {
+      console.log('Fetching user profile for ID:', userId);
+  
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+  
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching user profile:', error);
+        throw error;
       }
+  
+      if (data) {
+        console.log('User profile found:', data);
+        setProfile(data);
+      } else {
+        await createUserProfile(userId);
+      }
+    } catch (err) {
+      console.error('Exception in fetchProfile:', err);
+    }
+  };
+  
+  const createUserProfile = async (userId: string) => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+  
+      if (!userData?.user) return;
+  
+      const newUser = {
+        id: userData.user.id,
+        username:
+          userData.user.user_metadata?.name ||
+          userData.user.user_metadata?.full_name ||
+          'Anonymous Coder',
+        email: userData.user.email,
+        avatar_url: userData.user.user_metadata?.avatar_url || null,
+        rating: 1000,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+  
+      const { data, error } = await supabase
+        .from('users')
+        .insert(newUser)
+        .select()
+        .single();
+  
+      if (error) {
+        console.error('Error creating user:', error);
+        toast.error('Failed to create user record.');
+      } else {
+        console.log('User created:', data);
+        setProfile(data);
+      }
+    } catch (err) {
+      console.error('Exception in createUserProfile:', err);
     }
   };
 
