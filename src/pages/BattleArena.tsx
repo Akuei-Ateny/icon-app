@@ -75,7 +75,7 @@ const BattleArena = () => {
     queryKey: ['problem', battle?.problem_id],
     queryFn: async () => {
       if (!battle?.problem_id) throw new Error("Problem ID is required");
-      return getProblemById(battle.problem_id.toString());
+      return getProblemById(Number(battle.problem_id));
     },
     enabled: !!battle?.problem_id,
   });
@@ -210,16 +210,16 @@ const BattleArena = () => {
       console.log("Submission created successfully:", submission);
       
       try {
-        // Call OpenAI evaluation API - Using a try-catch block for the API call specifically
+        // Call OpenAI evaluation API 
         console.log("Calling GPT evaluation API...");
         const apiEndpoint = "https://icon-scoring.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview";
-        const apiKey = process.env.VITE_AZURE_OPENAI_KEY;
+        const apiKey = import.meta.env.VITE_AZURE_OPENAI_API_KEY;
         
         console.log("API request configuration:", { 
           endpoint: apiEndpoint, 
           problemTitle: problem.title,
           codeLength: code.length,
-          apiKeyLength: apiKey.length // Don't log the full key
+          apiKeyLength: apiKey.length
         });
         
         const gptRes = await fetch(apiEndpoint, {
