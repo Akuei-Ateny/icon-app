@@ -19,4 +19,14 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Ensure build works in environments like Render
+  optimizeDeps: {
+    include: ['react', 'react-dom'],
+  },
+  build: {
+    sourcemap: true,
+    commonjsOptions: {
+      include: [/node_modules/],
+    },
+  },
 }));
