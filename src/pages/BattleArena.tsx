@@ -213,7 +213,7 @@ const BattleArena = () => {
         // Call OpenAI evaluation API 
         console.log("Calling GPT evaluation API...");
         const apiEndpoint = "https://icon-scoring.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview";
-        const apiKey = import.meta.env.VITE_AZURE_OPENAI_API_KEY;
+        const apiKey = process.env.VITE_AZURE_OPENAI_API_KEY;
         
         console.log("API request configuration:", { 
           endpoint: apiEndpoint, 
